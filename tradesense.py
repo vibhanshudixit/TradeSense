@@ -1,5 +1,5 @@
 import re
-import datetime
+from datetime import datetime, timedelta
 import requests
 
 # NLP and map sections
@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import datefinder
 import yfinance as yf
+#import investpy as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import nltk
@@ -23,7 +24,7 @@ years_in = int(input("Enter the number of years: "))
 #years_in = 2
 
 # Get current year through datetime module
-current_year = datetime.datetime.now().year
+current_year = datetime.now().year
 
 # Sample list of words
 q_words = ['first','second','third','fourth']
@@ -136,15 +137,19 @@ for url in url_list:
     text = ''
     html = urllib.request.urlopen(url).read()
     soup = BeautifulSoup(html, 'html.parser')
+    date_tag = soup.find('p')
     # view page source for details on NVDA
     if apple != -1:
-        text_all = soup.find_all(attrs={'classs': 'pagebody-copy'})
+        text_all = soup.find_all(attrs={'class': 'pagebody-copy'})
         for element in text_all:
               text_0 = element.get_text(' ', strip=True)
               text = text + text_0
     else:
       body = soup.body
-      p_tags = body.find_all('p', limit=6) # adjust limit
+      if body is not None:
+        p_tags = body.find_all('p', limit=6)
+      else:
+        p_tags = soup.find_all('p', limit=6)    
       for p in p_tags:
            text_0 = p.text
            #print(text_0)
@@ -173,21 +178,29 @@ for url in url_list:
     unique_string = (" ").join(words_v2)
 
     # Use datefinder to find first match in text. Then break becuase date always at beignning of quarterly release
-    matches = datefinder.find_dates(unique_string)
-    # for match in matches:
-    #     break
-    # dates.append(match)
-    match = next(matches, None)
-    if match is not None:
-        dates.append(match)
+    if date_tag:
+        dt = date_tag.get_text(" ", strip=True)
+        matches = list(datefinder.find_dates(unique_string))
+    # if matches:
+    #      dates.append(matches[0])
+    # else:
+    #      dates.append(None)
+    for match in matches:
+        break
+    dates.append(match)
+
+    # match = next(matches, None)
+    # if match is not None:
+    #     dates.append(match)
 
 
     # Use sentiment Intensity Analyzer
     sia = SentimentIntensityAnalyzer()
 
+    # VADER (Valence Aware Dictionary and sEntiment Reasoner) is a sentiment analysis tool optimized for social media and financial text.
     from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
     vader = SentimentIntensityAnalyzer()
-    vsent = vader.polarity_scores(unique_string)
+    vsent = vader.polarity_scores(unique_string) # ranges from -1 to 1, where -1 is negative, 0 is neutral, and 1 is positive.
 
     from textblob import TextBlob
     blob = TextBlob(unique_string)
@@ -195,13 +208,13 @@ for url in url_list:
 
     from afinn import Afinn
     afinn = Afinn()
-    asent = afinn.score(unique_string)
+    asent = afinn.score(unique_string) # This gives a score which is the sum of individual word scores. Rangign from negative(unhappy) to positive(happy).
 
     # Create dataframes from two sentiment analyzers, concat, add new columns for other two sentiment intensity analyzers.
     siascores.append(sia.polarity_scores(unique_string))
     vaderscores.append(vsent)
-    tblobscores.append(bsent.polarity)
-    tblobscores2.append(bsent.subjectivity)
+    tblobscores.append(bsent.polarity) # ranges from -1 to 1, where -1 is negative, 0 is neutral, and 1 is positive. Tells you how positive or negative the report is.
+    tblobscores2.append(bsent.subjectivity) # ranges from 0 to 1, where 0 is objective and 1 is subjective. Teels how much of the report is opinion vs fact
     afinnscores.append(asent)
 
 df1 = pd.DataFrame(siascores)
@@ -228,11 +241,55 @@ df1 = df1.sort_values(by='Date')
 print(df1.head(10))
 
 
+# The problem we are facing right now is with yfinance, which runs out of request constantly
+# ---------------------------------------------------------------------------------------------------------------#
+# To overcome this, we are going to use investpy and define a ticker function itself which will replicate this 
+
+# This is the last thing i made for the investpy, it was good but led to a ConnectionError(), I don't know why
+# class Ticker:
+#     def __init__(self, stock: str, country='united states'):
+#         self.stock = stock
+#         self.country = country
+
+#     def history(self, period: str = "1y", interval: str = "Daily") -> pd.DataFrame:
+#         # Convert period like '5y', '6mo', '30d' into start_date and end_date
+#         end_date = datetime.today()
+        
+#         if period.endswith("y"):  # years
+#             years = int(period[:-1])
+#             start_date = end_date - timedelta(days=years * 365)
+#         elif period.endswith("mo"):  # months
+#             months = int(period[:-2])
+#             start_date = end_date - timedelta(days=months * 30)
+#         elif period.endswith("d"):  # days
+#             days = int(period[:-1])
+#             start_date = end_date - timedelta(days=days)
+#         else:
+#             raise ValueError("Unsupported period format. Use like '5y', '6mo', '30d'.")
+
+#         # Format for investpy
+#         from_date = start_date.strftime("%d/%m/%Y")
+#         to_date = end_date.strftime("%d/%m/%Y")
+
+#         df2 = yf.get_stock_historical_data(
+#             stock=self.stock,
+#             country=self.country,
+#             from_date=from_date,
+#             to_date=to_date,
+#             interval=interval
+#         )
+#         return df2
+
+
+# ticker = Ticker('AAPL')
+# historical_data = ticker.history(period=str(years_in) + 'y')
+# ---------------------------------------------------------------------------# 
+
 # yfinance section
 # Define the ticker symbol and create a ticker object
+# yfinance code         
 ticker_symbol = 'AAPL'
 ticker = yf.Ticker(ticker_symbol)
-
 historical_data = ticker.history(period=str(years_in) + 'y')
 df2 = pd.DataFrame(historical_data)
 
